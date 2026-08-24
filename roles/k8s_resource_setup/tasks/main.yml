@@ -1,0 +1,130 @@
+---
+- name: Install Helm CLI on Primary Master
+  shell: |
+    curl [https://raw.githubusercontent.com/helm/helm/main/scripts/get-helm-3](https://raw.githubusercontent.com/helm/helm/main/scripts/get-helm-3) | bash
+  args:
+    creates: /usr/local/bin/helm
+
+- name: Add Helm Repositories
+  kubernetes.core.helm_repository:
+    name: "{{ item.name }}"
+    repo_url: "{{ item.url }}"
+  loop:
+    - { name: 'rancher-stable', url: '[https://releases.rancher.com/server-charts/stable](https://releases.rancher.com/server-charts/stable)' }
+    - { name: 'ingress-nginx', url: '[https://kubernetes.github.io/ingress-nginx](https://kubernetes.github.io/ingress-nginx)' }
+    - { name: 'hashicorp', url: '[https://helm.releases.hashicorp.com](https://helm.releases.hashicorp.com)' }
+    - { name: 'argo', url: '[https://argoproj.github.io/argo-helm](https://argoproj.github.io/argo-helm)' }
+    - { name: 'prometheus-community', url: '[https://prometheus-community.github.io/helm-charts](https://prometheus-community.github.io/helm-charts)' }
+    - { name: 'jetstack', url: '[https://charts.jetstack.io](https://charts.jetstack.io)' }
+
+- name: Create Kubernetes Namespaces
+  kubernetes.core.k8s:
+    name: "{{ item }}"
+    api_version: v1
+    kind: Namespace
+    state: present
+  loop:
+    - ingress-nginx
+    - cert-manager
+    - cattle-system
+    - vault
+    - argocd
+    - monitoring
+
+- name: Deploy NGINX Ingress Controller via Helm
+  kubernetes.core.helm:
+    name: ingress-nginx
+    chart_ref: ingress-nginx/ingress-nginx
+    release_namespace: ingress-nginx
+    values:
+      controller:
+        kind: DaemonSet
+        service:
+          type: NodePort
+          nodePorts:
+            http: 30080
+            https: 30443
+        metrics:
+          enabled: true
+
+- name: Deploy Cert-Manager via Helm
+  kubernetes.core.helm:
+    name: cert-manager
+    chart_ref: jetstack/cert-manager
+    release_namespace: cert-manager
+    set_values:
+      - value: installCRDs=true
+
+- name: Deploy Rancher Management Server
+  kubernetes.core.helm:
+    name: rancher
+    chart_ref: rancher-stable/rancher
+    release_namespace: cattle-system
+    set_values:
+      - value: hostname=rancher.internal.domain
+      - value: bootstrapPassword=AdminSuperSecurePassword2026!
+
+- name: Deploy HashiCorp Vault via Helm
+  kubernetes.core.helm:
+    name: vault
+    chart_ref: hashicorp/vault
+    release_namespace: vault
+    values:
+      server:
+        ha:
+          enabled: true
+          replicas: 3
+          raft:
+            enabled: true
+
+- name: Deploy ArgoCD via Helm
+  kubernetes.core.helm:
+    name: argocd
+    chart_ref: argo/argo-cd
+    release_namespace: argocd
+    set_values:
+      - value: server.service.type=ClusterIP
+
+- name: Create Ingress for ArgoCD
+  kubernetes.core.k8s:
+    state: present
+    definition:
+      apiVersion: networking.k8s.io/v1
+      kind: Ingress
+      metadata:
+        name: argocd-server-ingress
+        namespace: argocd
+        annotations:
+          nginx.ingress.kubernetes.io/backend-protocol: "HTTPS"
+          nginx.ingress.kubernetes.io/ssl-passthrough: "true"
+      spec:
+        ingressClassName: nginx
+        rules:
+        - host: argocd.internal.domain
+          http:
+            paths:
+            - path: /
+              pathType: Prefix
+              backend:
+                service:
+                  name: argocd-server
+                  port:
+                    name: https
+
+- name: Deploy Prometheus & Grafana Monitoring Stack
+  kubernetes.core.helm:
+    name: kube-prometheus-stack
+    chart_ref: prometheus-community/kube-prometheus-stack
+    release_namespace: monitoring
+    values:
+      grafana:
+        enabled: true
+        adminPassword: GrafanaSuperSecurePass2026!
+        ingress:
+          enabled: true
+          ingressClassName: nginx
+          hosts:
+            - grafana.internal.domain
+      prometheus:
+        prometheusSpec:
+          retention: 30d

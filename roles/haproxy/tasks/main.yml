@@ -1,0 +1,26 @@
+---
+- name: Install HAProxy and Keepalived
+  apt:
+    name:
+      - haproxy
+      - keepalived
+      - psmisc
+    state: present
+
+- name: Enable Non-Local IP Binding Kernel Variable
+  sysctl:
+    name: net.ipv4.ip_nonlocal_bind
+    value: '1'
+    state: present
+    reload: yes
+
+- name: Allow Traffic for Keepalived VRRP and HAProxy Ports
+  ufw:
+    rule: allow
+    port: "{{ item }}"
+    proto: tcp
+  loop:
+    - '80'
+    - '443'
+    - '6443'
+    - '8443'

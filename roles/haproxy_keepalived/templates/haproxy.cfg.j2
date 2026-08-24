@@ -1,0 +1,90 @@
+global
+    log /dev/log local0
+    log /dev/log local1 notice
+    chroot /var/lib/haproxy
+    user haproxy
+    group haproxy
+    daemon
+    maxconn 50000
+
+defaults
+    log     global
+    mode    tcp
+    option  tcplog
+    option  dontlognull
+    timeout connect 5000ms
+    timeout client  50000ms
+    timeout server  50000ms
+
+# ---------------------------------------------------------------------
+# HAProxy Statistics Dashboard
+# ---------------------------------------------------------------------
+listen stats
+    mode http
+    bind 192.168.1.10:8443
+    stats enable
+    stats uri /
+    stats refresh 5s
+    stats auth admin:StatsAdminPass2026!
+
+# ---------------------------------------------------------------------
+# Kubernetes API Server Load Balancing (Port 6443)
+# ---------------------------------------------------------------------
+frontend k8s-apiserver-front
+    bind 192.168.1.10:6443
+    mode tcp
+    default_backend k8s-apiserver-back
+
+backend k8s-apiserver-back
+    mode tcp
+    option tcp-check
+    balance roundrobin
+{% for host in groups['k8s_masters'] %}
+    server {{ host }} {{ hostvars[host]['ansible_host'] }}:6443 check fall 3 rise 2
+{% endfor %}
+
+# ---------------------------------------------------------------------
+# Kubernetes Join/Register Endpoint Load Balancing (Port 9345)
+# ---------------------------------------------------------------------
+frontend k8s-register-front
+    bind 192.168.1.10:9345
+    mode tcp
+    default_backend k8s-register-back
+
+backend k8s-register-back
+    mode tcp
+    option tcp-check
+    balance roundrobin
+{% for host in groups['k8s_masters'] %}
+    server {{ host }} {{ hostvars[host]['ansible_host'] }}:9345 check fall 3 rise 2
+{% endfor %}
+
+# ---------------------------------------------------------------------
+# HTTP Ingress Traffic (Port 80 -> K8s NGINX Ingress NodePort 30080)
+# ---------------------------------------------------------------------
+frontend http-ingress-front
+    bind 192.168.1.10:80
+    mode tcp
+    default_backend http-ingress-back
+
+backend http-ingress-back
+    mode tcp
+    balance roundrobin
+{% for host in groups['k8s_workers'] %}
+    server {{ host }} {{ hostvars[host]['ansible_host'] }}:30080 check
+{% endfor %}
+
+# ---------------------------------------------------------------------
+# HTTPS Ingress Traffic (Port 443 -> K8s NGINX Ingress NodePort 30443)
+# ---------------------------------------------------------------------
+frontend https-ingress-front
+    bind 192.168.1.10:443
+    mode tcp
+    default_backend https-ingress-back
+
+backend https-ingress-back
+    mode tcp
+    balance roundrobin
+{% for host in groups['k8s_workers'] %}
+    server {{ host }} {{ hostvars[host]['ansible_host'] }}:30443 check
+{% endfor %}

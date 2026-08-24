@@ -1,0 +1,40 @@
+---
+- name: Tune Virtual Memory Max Map Count
+  sysctl:
+    name: vm.max_map_count
+    value: '262144'
+    state: present
+    reload: yes
+
+- name: Add Elastic APT GPG Key
+  apt_key:
+    url: [https://artifacts.elastic.co/GPG-KEY-elasticsearch](https://artifacts.elastic.co/GPG-KEY-elasticsearch)
+    state: present
+
+- name: Add Elastic APT Repository
+  apt_repository:
+    repo: "deb [https://artifacts.elastic.co/packages/8.x/apt](https://artifacts.elastic.co/packages/8.x/apt) stable main"
+    state: present
+
+- name: Install Elasticsearch, Kibana, & Logstash
+  apt:
+    name:
+      - elasticsearch
+      - kibana
+      - logstash
+    state: present
+
+- name: Set Elasticsearch Built-in Password
+  shell: |
+    echo "ElasticSuperSecurePass2026!" | /usr/share/elasticsearch/bin/elasticsearch-keystore add -x -f 'bootstrap.password'
+  ignore_errors: yes
+
+- name: Allow ELK Stack Ports
+  ufw:
+    rule: allow
+    port: "{{ item }}"
+    proto: tcp
+  loop:
+    - '9200' # Elasticsearch REST API
+    - '5601' # Kibana UI
+    - '5044' # Logstash Beats Receiver

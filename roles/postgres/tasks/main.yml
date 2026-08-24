@@ -1,0 +1,49 @@
+---
+- name: Add PostgreSQL Official APT Repository Key
+  apt_key:
+    url: [https://www.postgresql.org/media/keys/ACCC4CF8.asc](https://www.postgresql.org/media/keys/ACCC4CF8.asc)
+    state: present
+
+- name: Add PostgreSQL APT Repository
+  apt_repository:
+    repo: "deb [http://apt.postgresql.org/pub/repos/apt](http://apt.postgresql.org/pub/repos/apt) {{ ansible_distribution_release }}-pgdg main"
+    state: present
+
+- name: Install PostgreSQL 18 Packages
+  apt:
+    name:
+      - postgresql-18
+      - postgresql-contrib-18
+      - patroni
+      - pgbackrest
+    state: present
+    update_cache: yes
+
+- name: Configure PostgreSQL to Listen on All Interfaces (Public Access)
+  lineinfile:
+    path: /etc/postgresql/18/main/postgresql.conf
+    regexp: "^#?listen_addresses\\s*=.*"
+    line: "listen_addresses = '*'"
+  notify: Restart PostgreSQL
+
+- name: Configure Client Authentication in pg_hba.conf (Allow Remote Connections)
+  blockinfile:
+    path: /etc/postgresql/18/main/pg_hba.conf
+    block: |
+      # Allow Public IPv4 & IPv6 Remote Connections
+      host    all             all             0.0.0.0/0               scram-sha-256
+      host    all             all             ::/0                    scram-sha-256
+  notify: Restart PostgreSQL
+
+- name: Set Superuser Password for postgres
+  become: yes
+  become_user: postgres
+  postgresql_query:
+    db: postgres
+    query: "ALTER USER postgres WITH PASSWORD 'PgSuperSecurePass2026!';"
+
+- name: Open UFW Port 5432 for Public PostgreSQL Access
+  ufw:
+    rule: allow
+    port: '5432'
+    proto: tcp

@@ -1,0 +1,38 @@
+---
+- name: Install Redis Server
+  apt:
+    name: redis-server
+    state: present
+
+- name: Configure Redis Bind Address
+  lineinfile:
+    path: /etc/redis/redis.conf
+    regexp: '^bind '
+    line: 'bind 0.0.0.0'
+
+- name: Configure Redis Authentication Password
+  lineinfile:
+    path: /etc/redis/redis.conf
+    regexp: '^#?requirepass '
+    line: 'requirepass RedisSuperSecurePass2026!'
+
+- name: Enable Redis Protected Mode
+  lineinfile:
+    path: /etc/redis/redis.conf
+    regexp: '^protected-mode '
+    line: 'protected-mode yes'
+
+- name: Restart Redis Service
+  systemd:
+    name: redis-server
+    state: restarted
+    enabled: yes
+
+- name: Allow Redis Ports via UFW
+  ufw:
+    rule: allow
+    port: "{{ item }}"
+    proto: tcp
+  loop:
+    - '6379' # Redis Server
+    - '26379' # Redis Sentinel

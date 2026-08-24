@@ -1,0 +1,55 @@
+---
+- name: Install HAProxy, Keepalived, and psmisc
+  apt:
+    name:
+      - haproxy
+      - keepalived
+      - psmisc
+    state: present
+    update_cache: yes
+
+- name: Enable Non-Local IP Binding Kernel Variable
+  sysctl:
+    name: net.ipv4.ip_nonlocal_bind
+    value: '1'
+    state: present
+    reload: yes
+
+- name: Deploy Keepalived Configuration
+  template:
+    src: keepalived.conf.j2
+    dest: /etc/keepalived/keepalived.conf
+    owner: root
+    group: root
+    mode: '0644'
+  notify: Restart Keepalived
+
+- name: Deploy HAProxy Configuration
+  template:
+    src: haproxy.cfg.j2
+    dest: /etc/haproxy/haproxy.cfg
+    owner: root
+    group: root
+    mode: '0644'
+  notify: Restart HAProxy
+
+- name: Open UFW Firewall Ports for VRRP and Services
+  ufw:
+    rule: allow
+    port: "{{ item }}"
+    proto: tcp
+  loop:
+    - '80'
+    - '443'
+    - '6443'
+    - '8443'
+    - '9345'
+
+- name: Enable and Start Keepalived and HAProxy Services
+  systemd:
+    name: "{{ item }}"
+    state: started
+    enabled: yes
+  loop:
+    - keepalived
+    - haproxy

@@ -1,0 +1,38 @@
+---
+- name: Load Overlay and br_netfilter Modules
+  modprobe:
+    name: "{{ item }}"
+    state: present
+  loop:
+    - overlay
+    - br_netfilter
+
+- name: Persist Modules on Boot
+  copy:
+    dest: /etc/modules-load.d/k8s.conf
+    content: |
+      overlay
+      br_netfilter
+
+- name: Apply K8s Specific Sysctl Rules
+  sysctl:
+    name: "{{ item.key }}"
+    value: "{{ item.value }}"
+    state: present
+    reload: yes
+  loop:
+    - { key: 'net.bridge.bridge-nf-call-iptables', value: '1' }
+    - { key: 'net.bridge.bridge-nf-call-ip6tables', value: '1' }
+
+- name: Open UFW Firewall Ports for Kubernetes Nodes
+  ufw:
+    rule: allow
+    port: "{{ item }}"
+    proto: tcp
+  loop:
+    - '6443'   # K8s API Server
+    - '9345'   # RKE2 Register
+    - '10250'  # Kubelet API
+    - '2379'   # etcd Client
+    - '2380'   # etcd Peer
+    - '30000:32767' # NodePort Range

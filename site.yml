@@ -1,0 +1,48 @@
+---
+- name: Apply Common Base Configuration across all nodes
+  hosts: all
+  become: yes
+  roles:
+    - common_os_base
+
+- name: Setup HAProxy and Keepalived VIP
+  hosts: haproxy
+  become: yes
+  roles:
+    - haproxy_keepalived
+
+- name: Install and Initialize Kubernetes Cluster (RKE2)
+  hosts: k8s_cluster
+  become: yes
+  roles:
+    - k8s_install
+
+- name: Provision Stateful Services Databases (Public PostgreSQL)
+  hosts: postgres_nodes
+  become: yes
+  roles:
+    - postgres
+
+- name: Provision MinIO Object Storage
+  hosts: minio_nodes
+  become: yes
+  roles:
+    - minio
+
+- name: Provision Redis Caching
+  hosts: redis_nodes
+  become: yes
+  roles:
+    - redis
+
+- name: Provision ELK Stack
+  hosts: elk_nodes
+  become: yes
+  roles:
+    - elk
+
+- name: Deploy Kubernetes Resource Stack (Helm, Rancher, DevSecOps, Monitoring)
+  hosts: k8s_primary_master
+  become: yes
+  roles:
+    - k8s_resource_setup

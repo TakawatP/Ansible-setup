@@ -1,0 +1,117 @@
+---
+- name: Load Overlay and br_netfilter Modules
+  modprobe:
+    name: "{{ item }}"
+    state: present
+  loop:
+    - overlay
+    - br_netfilter
+
+- name: Persist Modules on Boot
+  copy:
+    dest: /etc/modules-load.d/k8s.conf
+    content: |
+      overlay
+      br_netfilter
+
+- name: Apply K8s Specific Sysctl Rules
+  sysctl:
+    name: "{{ item.key }}"
+    value: "{{ item.value }}"
+    state: present
+    reload: yes
+  loop:
+    - { key: 'net.bridge.bridge-nf-call-iptables', value: '1' }
+    - { key: 'net.bridge.bridge-nf-call-ip6tables', value: '1' }
+
+- name: Open UFW Firewall Ports for Kubernetes
+  ufw:
+    rule: allow
+    port: "{{ item }}"
+    proto: tcp
+  loop:
+    - '6443'   # K8s API Server
+    - '9345'   # RKE2 Node Register
+    - '10250'  # Kubelet API
+    - '2379'   # etcd Client
+    - '2380'   # etcd Peer
+    - '30000:32767' # NodePort Range
+
+- name: Create RKE2 Config Directory
+  file:
+    path: /etc/rancher/rke2
+    state: directory
+    mode: '0755'
+
+- name: Deploy Primary Master RKE2 Config
+  copy:
+    dest: /etc/rancher/rke2/config.yaml
+    content: |
+      token: {{ rke2_token }}
+      tls-san:
+        - 192.168.1.10
+        - k8s-master-01
+  when: inventory_hostname in groups['k8s_primary_master']
+
+- name: Deploy Secondary Masters RKE2 Config
+  copy:
+    dest: /etc/rancher/rke2/config.yaml
+    content: |
+      server: [https://192.168.1.10:9345](https://192.168.1.10:9345)
+      token: {{ rke2_token }}
+      tls-san:
+        - 192.168.1.10
+  when: inventory_hostname in groups['k8s_secondary_masters']
+
+- name: Deploy Worker Nodes RKE2 Agent Config
+  copy:
+    dest: /etc/rancher/rke2/config.yaml
+    content: |
+      server: [https://192.168.1.10:9345](https://192.168.1.10:9345)
+      token: {{ rke2_token }}
+  when: inventory_hostname in groups['k8s_workers']
+
+- name: Install RKE2 Binary (Masters)
+  shell: |
+    curl -sfL [https://get.rke2.io](https://get.rke2.io) | INSTALL_RKE2_VERSION="{{ rke2_version }}" INSTALL_RKE2_TYPE="server" sh -
+  when: inventory_hostname in groups['k8s_masters']
+
+- name: Install RKE2 Binary (Workers)
+  shell: |
+    curl -sfL [https://get.rke2.io](https://get.rke2.io) | INSTALL_RKE2_VERSION="{{ rke2_version }}" INSTALL_RKE2_TYPE="agent" sh -
+  when: inventory_hostname in groups['k8s_workers']
+
+- name: Enable and Start Primary RKE2 Server
+  systemd:
+    name: rke2-server
+    state: started
+    enabled: yes
+  when: inventory_hostname in groups['k8s_primary_master']
+
+- name: Pause for Primary Master Initialization
+  pause:
+    seconds: 30
+  when: inventory_hostname in groups['k8s_primary_master']
+
+- name: Enable and Start Secondary RKE2 Servers
+  systemd:
+    name: rke2-server
+    state: started
+    enabled: yes
+  when: inventory_hostname in groups['k8s_secondary_masters']
+
+- name: Enable and Start RKE2 Agents (Workers)
+  systemd:
+    name: rke2-agent
+    state: started
+    enabled: yes
+  when: inventory_hostname in groups['k8s_workers']
+
+- name: Symlink kubectl Binary and Setup Kubeconfig for Primary Master
+  shell: |
+    ln -s /var/lib/rancher/rke2/bin/kubectl /usr/local/bin/kubectl
+    mkdir -p /root/.kube
+    cp /etc/rancher/rke2/rke2.yaml /root/.kube/config
+    chmod 600 /root/.kube/config
+  when: inventory_hostname in groups['k8s_primary_master']
+  ignore_errors: yes
